@@ -35,7 +35,16 @@ const app = express();
 connectDB();
 
 // Security Middleware
-app.use(helmet());
+app.set('trust proxy', 1);
+app.use(helmet({
+  contentSecurityPolicy: {
+    useDefaults: true,
+    directives: {
+      'img-src': ["'self'", 'data:', 'blob:', 'https:'],
+      'frame-src': ["'self'", 'https://maps.google.com', 'https://www.google.com'],
+    },
+  },
+}));
 app.use(cors({ origin: process.env.CLIENT_URL, credentials: true }));
 
 // Rate Limiting
@@ -96,6 +105,14 @@ app.use('/api/settings', settingsRoutes);
 
 // Health check
 app.get('/api/health', (req, res) => res.json({ status: 'OK', message: 'School ERP API Running' }));
+
+// Serve the built React frontend (single-service deploy)
+const clientDist = path.join(__dirname, '../../frontend/dist');
+app.use(express.static(clientDist));
+app.get('*', (req, res, next) => {
+  if (req.path.startsWith('/api') || req.path.startsWith('/uploads')) return next();
+  res.sendFile(path.join(clientDist, 'index.html'), err => { if (err) next(); });
+});
 
 // Error Handler
 app.use(errorHandler);
