@@ -4,7 +4,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc && vite build",
+    "build": "vite build",
+    "start": "npx serve -s dist -l $PORT",
     "preview": "vite preview"
   },
   "dependencies": {
