@@ -56,6 +56,8 @@ function timeAgo(dateStr) {
   return Math.floor(diff/86400) + 'd ago';
 }
 
+const isMobile = () => typeof window !== 'undefined' && window.innerWidth < 768;
+
 // ── Bell dropdown ─────────────────────────────────────────────────────────────
 function NotifBell({ navigate }) {
   const [open, setOpen]     = useState(false);
@@ -79,6 +81,11 @@ function NotifBell({ navigate }) {
     setNotifs(prev => prev.map(n => ({ ...n, read:true })));
     toast.success('All marked as read');
   };
+
+  // On phones the dropdown is pinned to the screen edges so it never overflows
+  const panelPosition = isMobile()
+    ? { position:'fixed', top:60, left:12, right:12, width:'auto' }
+    : { position:'absolute', top:'calc(100% + 8px)', right:0, width:360 };
 
   return (
     <div ref={ref} style={{ position:'relative' }}>
@@ -114,8 +121,8 @@ function NotifBell({ navigate }) {
       {/* Dropdown panel */}
       {open && (
         <div style={{
-          position:'absolute', top:'calc(100% + 8px)', right:0,
-          width:360, background:'#fff', borderRadius:14,
+          ...panelPosition,
+          background:'#fff', borderRadius:14,
           boxShadow:'0 8px 32px rgba(0,0,0,.14), 0 1px 4px rgba(0,0,0,.08)',
           border:'1px solid #e5e7eb', zIndex:999, overflow:'hidden',
         }}>
@@ -228,7 +235,8 @@ function NotifBell({ navigate }) {
 
 // ── Main Layout ───────────────────────────────────────────────────────────────
 export default function MainLayout() {
-  const [sidebarOpen, setSidebarOpen] = useState(true);
+  // Sidebar starts closed on phones, open on larger screens
+  const [sidebarOpen, setSidebarOpen] = useState(!isMobile());
   const { user, logout } = useAuth();
   const navigate = useNavigate();
 
@@ -240,8 +248,16 @@ export default function MainLayout() {
 
   return (
     <div className="flex h-screen overflow-hidden bg-gray-50">
+      {/* Mobile backdrop: tap outside the menu to close it */}
+      {sidebarOpen && (
+        <div
+          className="fixed inset-0 bg-black/40 z-30 md:hidden"
+          onClick={() => setSidebarOpen(false)}
+        />
+      )}
+
       {/* Sidebar */}
-      <aside className={`${sidebarOpen ? 'w-64' : 'w-0 -translate-x-full'} bg-slate-800 text-white flex flex-col transition-all duration-300 overflow-hidden flex-shrink-0`}>
+      <aside className={`${sidebarOpen ? 'w-64' : 'w-0 -translate-x-full'} fixed md:static inset-y-0 left-0 z-40 bg-slate-800 text-white flex flex-col transition-all duration-300 overflow-hidden flex-shrink-0`}>
         {/* Logo */}
         <div className="flex items-center gap-3 px-5 py-4 border-b border-slate-700">
           <div className="bg-blue-600 rounded-lg p-1.5"><School size={20} className="text-white" /></div>
@@ -258,6 +274,7 @@ export default function MainLayout() {
               key={path}
               to={path}
               end={exact}
+              onClick={() => { if (isMobile()) setSidebarOpen(false); }}
               className={({ isActive }) => `sidebar-item ${isActive ? 'active' : 'inactive'}`}
             >
               <Icon size={18} />
@@ -284,9 +301,9 @@ export default function MainLayout() {
       </aside>
 
       {/* Main */}
-      <div className="flex-1 flex flex-col overflow-hidden">
+      <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
         {/* Topbar */}
-        <header className="bg-white border-b border-gray-100 px-6 py-3 flex items-center justify-between flex-shrink-0">
+        <header className="bg-white border-b border-gray-100 px-3 md:px-6 py-3 flex items-center justify-between flex-shrink-0">
           <button onClick={() => setSidebarOpen(!sidebarOpen)} className="p-2 rounded-lg hover:bg-gray-100 transition-colors">
             <Menu size={20} className="text-gray-600" />
           </button>
@@ -301,7 +318,7 @@ export default function MainLayout() {
         </header>
 
         {/* Page Content */}
-        <main className="flex-1 overflow-y-auto p-6">
+        <main className="flex-1 overflow-y-auto p-3 md:p-6">
           <Outlet />
         </main>
       </div>
