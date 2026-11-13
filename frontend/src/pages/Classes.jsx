@@ -70,6 +70,12 @@ function ClassesTab() {
   const [view, setView]         = useState('grid');
   const [modal, setModal]       = useState(null); // { mode:'add'|'edit', section?, cls?, form }
   const [saving, setSaving]     = useState(false);
+  const [assign, setAssign]             = useState(null); // { cls, sec }
+  const [pool, setPool]                 = useState([]);
+  const [picked, setPicked]             = useState({});
+  const [poolSearch, setPoolSearch]     = useState('');
+  const [poolLoading, setPoolLoading]   = useState(false);
+  const [assignSaving, setAssignSaving] = useState(false);
 
   const load = async () => {
     setLoading(true);
@@ -170,6 +176,51 @@ function ClassesTab() {
       toast.success('Class deleted');
       load();
     } catch (err) { toast.error(errMsg(err, 'Could not delete the class'), { duration: 6000 }); }
+  };
+
+  // ── Manage students of a section ────────────────────────────────────────────
+  const norm   = (v) => String(v ?? '').trim().toLowerCase();
+  const stuCls = (s) => ((s.class && typeof s.class === 'object') ? s.class.name : s.class) || '';
+  const stuSec = (s) => ((s.section && typeof s.section === 'object') ? s.section.name : s.section) || '';
+  const inSection = (s, cls, sec) =>
+    String(s.section) === String(sec._id) ||
+    (norm(stuCls(s)) === norm(cls.name) && norm(stuSec(s)) === norm(sec.name));
+
+  const openAssign = async (r) => {
+    setAssign({ cls: r.cls, sec: r.sec }); setPoolSearch(''); setPoolLoading(true);
+    try {
+      const res = await api.get('/students', { params: { limit: 500 } });
+      const list = res.data.data || [];
+      setPool(list);
+      const p = {};
+      list.forEach(s => { if (inSection(s, r.cls, r.sec)) p[s._id] = true; });
+      setPicked(p);
+    } catch (err) {
+      toast.error(errMsg(err, 'Could not load students'));
+      setAssign(null);
+    } finally { setPoolLoading(false); }
+  };
+
+  const saveAssign = async () => {
+    const { cls, sec } = assign;
+    const toAdd    = pool.filter(s => picked[s._id] && !inSection(s, cls, sec));
+    const toRemove = pool.filter(s => !picked[s._id] && inSection(s, cls, sec));
+    const total    = pool.filter(s => picked[s._id]).length;
+    if (!toAdd.length && !toRemove.length) { setAssign(null); return; }
+    if (sec.capacity && total > sec.capacity) { toast.error(`Capacity is ${sec.capacity} — you selected ${total}`); return; }
+    setAssignSaving(true);
+    try {
+      const ops = [
+        ...toAdd.map(s => () => api.put(`/students/${s._id}`, { class: cls.name, section: sec.name, academicYear: cls.academicYear })),
+        ...toRemove.map(s => () => api.put(`/students/${s._id}`, { class: '', section: '' })),
+      ];
+      for (let i = 0; i < ops.length; i += 10) await Promise.all(ops.slice(i, i + 10).map(fn => fn()));
+      toast.success(`${toAdd.length} added, ${toRemove.length} removed`);
+      setAssign(null);
+      load();
+    } catch (err) {
+      toast.error(errMsg(err, 'Could not update students'));
+    } finally { setAssignSaving(false); }
   };
 
   const occupancy = (sec) => {
@@ -319,6 +370,12 @@ function ClassesTab() {
                       </div>
                     </>
                   )}
+                  {r.sec && (
+                    <button onClick={() => openAssign(r)} className="btn-secondary"
+                      style={{ width:'100%', justifyContent:'center', marginTop:10, fontSize:12 }}>
+                      <Users size={14}/> Manage Students
+                    </button>
+                  )}
                   {fees[r.cls._id] > 0 && (
                     <div style={{ marginTop:8, fontSize:11, color:'#64748b' }}>Fee ({currentAcademicYear()}): <strong style={{ color:'#0f172a' }}>{inr(fees[r.cls._id])}/year</strong></div>
                   )}
@@ -352,6 +409,66 @@ function ClassesTab() {
           </div>
         </div>
       )}
+
+      {/* Manage students modal */}
+      {assign && (() => {
+        const selected = pool.filter(s => picked[s._id]).length;
+        const cap = assign.sec.capacity;
+        const list = pool.filter(s => {
+          const qq = poolSearch.trim().toLowerCase();
+          return !qq || `${s.firstName} ${s.lastName} ${s.admissionNumber}`.toLowerCase().includes(qq);
+        });
+        return (
+          <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,.5)', zIndex:50, display:'flex', alignItems:'center', justifyContent:'center', padding:16 }}>
+            <div style={{ background:'#fff', borderRadius:18, maxWidth:560, width:'100%', maxHeight:'90vh', display:'flex', flexDirection:'column' }}>
+              <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', padding:'16px 20px', borderBottom:'1px solid #f1f5f9' }}>
+                <div>
+                  <div style={{ fontWeight:800, fontSize:15 }}>Students in {assign.cls.name} – {assign.sec.name}</div>
+                  <div style={{ fontSize:12, color: cap && selected > cap ? '#dc2626' : '#64748b', marginTop:2 }}>
+                    {selected} selected{cap ? ` / capacity ${cap}` : ''}
+                  </div>
+                </div>
+                <button onClick={() => setAssign(null)} style={{ padding:7, borderRadius:8, border:'none', background:'#f1f5f9', cursor:'pointer' }}><X size={14}/></button>
+              </div>
+
+              <div style={{ padding:'12px 20px', display:'flex', gap:8 }}>
+                <input className="input-field" placeholder="Search student or admission no..." value={poolSearch} onChange={e => setPoolSearch(e.target.value)} />
+                <button type="button" className="btn-secondary" style={{ whiteSpace:'nowrap', fontSize:12 }}
+                  onClick={() => setPicked(p => { const n = { ...p }; pool.forEach(s => { if (!stuCls(s)) n[s._id] = true; }); return n; })}>
+                  Select unassigned
+                </button>
+              </div>
+
+              <div style={{ flex:1, overflowY:'auto', padding:'0 20px 8px' }}>
+                {poolLoading ? (
+                  <div style={{ padding:32, textAlign:'center', color:'#94a3b8' }}><Loader size={16} className="animate-spin" style={{ display:'inline' }}/> Loading students...</div>
+                ) : list.length === 0 ? (
+                  <div style={{ padding:32, textAlign:'center', color:'#94a3b8', fontSize:13 }}>No students found. Add students first on the Students page.</div>
+                ) : list.map(s => {
+                  const where = stuCls(s) ? `${stuCls(s)}${stuSec(s) ? ' - ' + stuSec(s) : ''}` : 'Not assigned';
+                  return (
+                    <label key={s._id} style={{ display:'flex', alignItems:'center', gap:10, padding:'9px 4px', borderBottom:'1px solid #f1f5f9', cursor:'pointer' }}>
+                      <input type="checkbox" checked={!!picked[s._id]} onChange={e => setPicked(p => ({ ...p, [s._id]: e.target.checked }))} />
+                      <div style={{ flex:1, minWidth:0 }}>
+                        <div style={{ fontSize:13, fontWeight:600 }}>{s.firstName} {s.lastName}</div>
+                        <div style={{ fontSize:11, color:'#94a3b8' }}>Adm: {s.admissionNumber || '—'}</div>
+                      </div>
+                      <span style={{ fontSize:11, color:'#64748b' }}>{where}</span>
+                    </label>
+                  );
+                })}
+              </div>
+
+              <div style={{ display:'flex', justifyContent:'flex-end', gap:8, padding:'14px 20px', borderTop:'1px solid #f1f5f9' }}>
+                <button type="button" className="btn-secondary" onClick={() => setAssign(null)}>Cancel</button>
+                <button type="button" className="btn-primary" disabled={assignSaving || poolLoading} onClick={saveAssign}>
+                  {assignSaving ? <><Loader size={14} className="animate-spin"/> Saving...</> : 'Save'}
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Modal */}
       {modal && (
